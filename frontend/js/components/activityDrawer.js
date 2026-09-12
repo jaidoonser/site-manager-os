@@ -114,14 +114,32 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
     ));
   }
 
-  // Dates card
-  const dateField = (label, key, disabled) => h("div", { class: "field" },
-    h("label", {}, label),
-    h("input", {
+  function todayIso() { return new Date().toISOString().slice(0, 10); }
+
+  // Status (Ready/Active/Complete/etc.) is driven entirely by Actual
+  // start/end, not by the progress slider - so the two need to stay in
+  // sync or a task can sit at "100%" forever without ever becoming
+  // "Complete" (and without unblocking whatever comes after it). Nudging
+  // one to keep the other consistent - without ever overwriting a date the
+  // user already set - keeps that from surprising anyone.
+  const dateInputs = {};
+  const dateField = (label, key, disabled) => {
+    const input = h("input", {
       type: "date", value: editState[key], disabled: !!disabled,
-      onchange: (e) => { editState[key] = e.target.value; refreshReasonVisibility(); },
-    })
-  );
+      onchange: (e) => {
+        editState[key] = e.target.value;
+        if (key === "actual_end" && editState.actual_end && editState.progress_percent < 100) {
+          setProgress(100);
+        }
+        if (key === "actual_start" && editState.actual_start && editState.progress_percent === 0) {
+          setProgress(5);
+        }
+        refreshReasonVisibility();
+      },
+    });
+    dateInputs[key] = input;
+    return h("div", { class: "field" }, h("label", {}, label), input);
+  };
 
   drawer.appendChild(h("div", { class: "card" },
     h("h2", {}, "Dates"),
@@ -141,9 +159,27 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
     type: "range", min: "0", max: "100", step: "5", value: String(editState.progress_percent),
   });
   const progressLabel = h("span", {}, `${editState.progress_percent}%`);
+
+  function setProgress(value) {
+    editState.progress_percent = value;
+    progressInput.value = String(value);
+    progressLabel.textContent = `${value}%`;
+  }
+
   progressInput.addEventListener("input", (e) => {
-    editState.progress_percent = Number(e.target.value);
-    progressLabel.textContent = `${editState.progress_percent}%`;
+    setProgress(Number(e.target.value));
+    // Forward-fill actual dates so status (and anything waiting on this
+    // task) keeps up with progress - but never overwrite a date already
+    // on record.
+    if (editState.progress_percent > 0 && !editState.actual_start) {
+      editState.actual_start = todayIso();
+      if (dateInputs.actual_start) dateInputs.actual_start.value = editState.actual_start;
+    }
+    if (editState.progress_percent >= 100 && !editState.actual_end) {
+      editState.actual_end = todayIso();
+      if (dateInputs.actual_end) dateInputs.actual_end.value = editState.actual_end;
+    }
+    refreshReasonVisibility();
   });
 
   const blockedCheckbox = h("input", {
@@ -157,7 +193,9 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
 
   drawer.appendChild(h("div", { class: "card" },
     h("h2", {}, "Progress"),
-    h("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:14px;" }, progressInput, progressLabel),
+    h("div", { style: "display:flex;align-items:center;gap:10px;margin-bottom:6px;" }, progressInput, progressLabel),
+    h("div", { style: "font-size:11.5px;color:var(--ink-soft);margin-bottom:14px;" },
+      "Dragging to 100% sets Actual end to today (if it isn't set yet) so the task shows as Complete — adjust the date above if it finished on a different day."),
     h("label", { style: "display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;margin-bottom:6px;" },
       blockedCheckbox, "Flag as blocked"),
     reasonInput
