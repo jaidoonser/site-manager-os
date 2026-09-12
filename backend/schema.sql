@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS drawing_sets (
     original_filename TEXT NOT NULL,
     stored_filename TEXT NOT NULL,
     page_count INTEGER NOT NULL DEFAULT 0,
+    discipline TEXT DEFAULT 'other', -- architectural | structural | civil | hydraulic | electrical | mechanical | landscape | fire | geotechnical | survey | other
+    discipline_confidence TEXT DEFAULT 'low', -- low | medium | confirmed (same "AI guess - review" pattern as sheets)
     uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (project_id) REFERENCES projects(id)
 );

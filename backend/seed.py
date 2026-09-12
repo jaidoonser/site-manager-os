@@ -110,8 +110,9 @@ def run():
     pdf_path = os.path.join(DRAWINGS_DIR, stored_name)
     make_drawing_pdf(pdf_path)
     cur = conn.execute(
-        "INSERT INTO drawing_sets (project_id, original_filename, stored_filename, page_count) VALUES (?, ?, ?, ?)",
-        (project_id, "Riverside Townhouses - Issued for Construction.pdf", stored_name, 2),
+        """INSERT INTO drawing_sets (project_id, original_filename, stored_filename, page_count, discipline, discipline_confidence)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (project_id, "Riverside Townhouses - Issued for Construction.pdf", stored_name, 2, "architectural", "confirmed"),
     )
     drawing_set_id = cur.lastrowid
 

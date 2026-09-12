@@ -1,7 +1,7 @@
 import os
 from flask import Flask, send_from_directory, jsonify
 
-from db import init_db, DB_PATH
+from db import init_db, get_db, DB_PATH, _migrate
 from routes.auth_routes import bp as auth_bp
 from routes.project_routes import bp as project_bp
 from routes.trade_routes import bp as trade_bp
@@ -51,5 +51,11 @@ if __name__ == "__main__":
         print("No database found - creating one with demo data (run `python3 seed.py` any time to reset it).")
         import seed
         seed.run()
+    else:
+        # Existing database from a previous run/version - apply any pending
+        # non-destructive schema migrations (e.g. newly added columns).
+        _conn = get_db()
+        _migrate(_conn)
+        _conn.close()
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=True)

@@ -7,6 +7,21 @@ const STATUS_COLORS = {
   complete: "#1e8e5a", active: "#2f6fed", ready: "#e2a336", not_ready: "#8b93a7", blocked: "#d64545", unassigned: "#c7cdd9",
 };
 
+const DISCIPLINES = [
+  { value: "architectural", label: "Architectural" },
+  { value: "structural", label: "Structural" },
+  { value: "civil", label: "Civil" },
+  { value: "hydraulic", label: "Hydraulic" },
+  { value: "electrical", label: "Electrical" },
+  { value: "mechanical", label: "Mechanical" },
+  { value: "landscape", label: "Landscape" },
+  { value: "fire", label: "Fire" },
+  { value: "geotechnical", label: "Geotechnical" },
+  { value: "survey", label: "Survey" },
+  { value: "other", label: "Other" },
+];
+const DISCIPLINE_LABELS = Object.fromEntries(DISCIPLINES.map((d) => [d.value, d.label]));
+
 let renderToken = 0;
 
 export async function renderPlans(container, pid, { sheetId } = {}) {
@@ -23,7 +38,7 @@ export async function renderPlans(container, pid, { sheetId } = {}) {
     for (const ds of drawingSets) { if (ds.sheets.length) { activeSheetId = ds.sheets[0].id; break; } }
   }
 
-  await drawLayout(container, pid, drawingSets, activeSheetId);
+  await drawLayout(container, pid, drawingSets, activeSheetId, null);
 }
 
 function renderEmpty(container, pid) {
@@ -31,9 +46,11 @@ function renderEmpty(container, pid) {
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files[0];
     if (!file) return;
+    const discipline = await promptDiscipline("What kind of drawing set is this?", { includeAuto: true });
+    if (discipline === null) { fileInput.value = ""; return; }
     toast("Uploading and indexing sheets…");
     try {
-      await api.uploadDrawing(pid, file);
+      await api.uploadDrawing(pid, file, discipline || undefined);
       toast("Drawing set uploaded");
       renderPlans(container, pid, {});
     } catch (e) { toast(e.message, true); }
@@ -50,27 +67,60 @@ function renderEmpty(container, pid) {
   );
 }
 
-async function drawLayout(container, pid, drawingSets, activeSheetId) {
-  const allSheets = drawingSets.flatMap((ds) => ds.sheets.map((s) => ({ ...s, drawingSetName: ds.original_filename })));
+async function drawLayout(container, pid, drawingSets, activeSheetId, activeDiscipline) {
+  const presentDisciplines = Array.from(new Set(drawingSets.map((ds) => ds.discipline || "other")));
+  const visibleSets = activeDiscipline ? drawingSets.filter((ds) => (ds.discipline || "other") === activeDiscipline) : drawingSets;
+  const allSheets = visibleSets.flatMap((ds) => ds.sheets.map((s) => ({ ...s, drawingSetName: ds.original_filename })));
   const activeSheet = allSheets.find((s) => s.id === activeSheetId) || allSheets[0];
 
   const fileInput = h("input", { type: "file", accept: "application/pdf", style: "display:none" });
   fileInput.addEventListener("change", async () => {
     const file = fileInput.files[0];
     if (!file) return;
+    const discipline = await promptDiscipline("What kind of drawing set is this?", { includeAuto: true });
+    if (discipline === null) { fileInput.value = ""; return; }
     toast("Uploading and indexing sheets…");
     try {
-      const ds = await api.uploadDrawing(pid, file);
+      const ds = await api.uploadDrawing(pid, file, discipline || undefined);
       toast(`Indexed ${ds.sheets.length} sheet(s)`);
       renderPlans(container, pid, { sheetId: ds.sheets[0] ? ds.sheets[0].id : undefined });
     } catch (e) { toast(e.message, true); }
   });
 
+  async function editDiscipline(ds) {
+    const chosen = await promptDiscipline(`Discipline for "${ds.original_filename}"`, { current: ds.discipline || "other" });
+    if (chosen === null) return;
+    try {
+      await api.updateDrawingSet(pid, ds.id, { discipline: chosen });
+      toast("Discipline updated");
+      renderPlans(container, pid, { sheetId: activeSheet ? activeSheet.id : undefined });
+    } catch (e) { toast(e.message, true); }
+  }
+
+  const filterBar = presentDisciplines.length > 1
+    ? h("div", { class: "discipline-tabs" },
+        h("button", {
+          class: "chip" + (!activeDiscipline ? " active" : ""),
+          onclick: () => drawLayout(container, pid, drawingSets, activeSheetId, null),
+        }, "All"),
+        presentDisciplines.map((d) => h("button", {
+          class: "chip" + (d === activeDiscipline ? " active" : ""),
+          onclick: () => drawLayout(container, pid, drawingSets, activeSheetId, d),
+        }, DISCIPLINE_LABELS[d] || "Other"))
+      )
+    : null;
+
   const sheetListEl = h("div", { class: "sheet-list" },
-    drawingSets.map((ds) => h("div", {},
-      h("div", { style: "font-size:11px;text-transform:uppercase;color:var(--ink-soft);font-weight:700;margin:10px 0 4px;" }, ds.original_filename),
+    filterBar,
+    visibleSets.map((ds) => h("div", {},
+      h("div", { class: "drawing-set-heading" },
+        h("span", { class: "name" }, ds.original_filename),
+        h("span", { class: "tag" }, DISCIPLINE_LABELS[ds.discipline] || "Other"),
+        ds.discipline_confidence && ds.discipline_confidence !== "confirmed" ? h("span", { class: "needs-review" }, "AI guess") : null,
+        h("button", { class: "link-btn", onclick: () => editDiscipline(ds) }, "Edit")
+      ),
       ds.sheets.map((s) => h("div", {
-        class: "sheet-item" + (s.id === activeSheet.id ? " active" : ""),
+        class: "sheet-item" + (activeSheet && s.id === activeSheet.id ? " active" : ""),
         onclick: () => navigate(`/p/${pid}/plans/${s.id}`),
       },
         h("div", { class: "num" }, s.sheet_number),
@@ -114,6 +164,7 @@ async function drawLayout(container, pid, drawingSets, activeSheetId) {
     )
   );
 
+  if (!activeSheet) return; // filtered discipline has no sheets - list-only state above is enough
   await renderSheetDetail(pid, activeSheet, sheetInfoEl, () => renderPlans(container, pid, { sheetId: activeSheet.id }));
   await renderSheetCanvas(pid, activeSheet, canvasWrap, zoneListEl);
 }
@@ -267,6 +318,27 @@ function setupZoneDrawing(pid, sheet, overlay, viewport, refresh) {
       toast("Zone created");
       refresh();
     } catch (err) { toast(err.message, true); }
+  });
+}
+
+function promptDiscipline(title, { includeAuto = false, current } = {}) {
+  return new Promise((resolve) => {
+    const options = [];
+    if (includeAuto) options.push(h("option", { value: "" }, "Let AI guess from the file"));
+    DISCIPLINES.forEach((d) => options.push(h("option", { value: d.value, selected: d.value === current }, d.label)));
+    const select = h("select", { autofocus: true }, options);
+    function close(val) { bg.remove(); resolve(val); }
+    const bg = h("div", { class: "modal-center-bg", onclick: (e) => { if (e.target === bg) close(null); } },
+      h("div", { class: "modal-card" },
+        h("div", { style: "font-weight:700;margin-bottom:10px;" }, title),
+        h("div", { class: "field" }, h("label", {}, "Discipline"), select),
+        h("div", { class: "form-actions" },
+          h("button", { class: "btn btn-secondary btn-sm", onclick: () => close(null) }, "Cancel"),
+          h("button", { class: "btn btn-primary btn-sm", onclick: () => close(select.value) }, "Continue")
+        )
+      )
+    );
+    document.body.appendChild(bg);
   });
 }
 

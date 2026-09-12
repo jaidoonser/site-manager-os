@@ -52,11 +52,13 @@ export const api = {
 
   // drawings
   drawings: (pid) => request(`/projects/${pid}/drawings`),
-  uploadDrawing: (pid, file) => {
+  uploadDrawing: (pid, file, discipline) => {
     const fd = new FormData();
     fd.append("file", file);
+    if (discipline) fd.append("discipline", discipline);
     return request(`/projects/${pid}/drawings`, { method: "POST", body: fd });
   },
+  updateDrawingSet: (pid, dsid, data) => request(`/projects/${pid}/drawing-sets/${dsid}`, { method: "PUT", body: data }),
   sheet: (pid, sid) => request(`/projects/${pid}/sheets/${sid}`),
   updateSheet: (pid, sid, data) => request(`/projects/${pid}/sheets/${sid}`, { method: "PUT", body: data }),
 

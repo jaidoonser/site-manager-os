@@ -3,7 +3,7 @@ import uuid
 from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from db import get_db
 from auth import login_required, project_access_required, current_user
-from pdf_parse import parse_drawing_set, render_sheet_image
+from pdf_parse import parse_drawing_set, render_sheet_image, guess_discipline, get_page_count
 
 bp = Blueprint("projects", __name__, url_prefix="/api/projects")
 
@@ -98,14 +98,28 @@ def upload_drawing(project_id):
 
     try:
         pages = parse_drawing_set(path)
-    except Exception as e:
-        pages = [{"page_number": 1, "sheet_number": "SHEET-1", "sheet_title": f.filename,
-                   "sheet_type": "plan", "ai_confidence": "low"}]
+    except Exception:
+        # Whatever went wrong, still index every actual page of the PDF -
+        # a parsing hiccup should never silently drop pages from the set.
+        page_count = get_page_count(path) or 1
+        pages = [{"page_number": i + 1, "sheet_number": f"SHEET-{i + 1}", "sheet_title": f.filename,
+                   "sheet_type": "plan", "ai_confidence": "low", "_text": ""} for i in range(page_count)]
+
+    # Discipline: use what the user picked in the upload dialog if given,
+    # otherwise guess it (same reviewable-AI pattern as sheet recognition).
+    discipline = (request.form.get("discipline") or "").strip().lower()
+    if discipline:
+        discipline_confidence = "confirmed"
+    else:
+        sample_text = " ".join((p.get("_text") or "") for p in pages[:3])
+        sheet_numbers = [p.get("sheet_number") for p in pages]
+        discipline, discipline_confidence = guess_discipline(f.filename, sample_text, sheet_numbers)
 
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO drawing_sets (project_id, original_filename, stored_filename, page_count) VALUES (?, ?, ?, ?)",
-        (project_id, f.filename, stored_name, len(pages)),
+        """INSERT INTO drawing_sets (project_id, original_filename, stored_filename, page_count, discipline, discipline_confidence)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (project_id, f.filename, stored_name, len(pages), discipline, discipline_confidence),
     )
     drawing_set_id = cur.lastrowid
     sheet_ids = []
@@ -125,7 +139,7 @@ def upload_drawing(project_id):
         sheet_ids.append(c2.lastrowid)
     conn.execute(
         """INSERT INTO diary_entries (project_id, entry_type, text, author) VALUES (?, 'system', ?, 'AI assistant')""",
-        (project_id, f"Uploaded drawing set '{f.filename}' – indexed {len(pages)} sheet(s), please review AI-suggested sheet names."),
+        (project_id, f"Uploaded drawing set '{f.filename}' – indexed {len(pages)} sheet(s) as {discipline}, please review AI-suggested sheet names."),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM drawing_sets WHERE id = ?", (drawing_set_id,)).fetchone()
@@ -172,6 +186,32 @@ def update_sheet(project_id, sheet_id):
         conn.execute(f"UPDATE sheets SET {set_clause} WHERE id = ?", values + [sheet_id])
         conn.commit()
     row = conn.execute("SELECT * FROM sheets WHERE id = ?", (sheet_id,)).fetchone()
+    conn.close()
+    return jsonify(dict(row))
+
+
+@bp.put("/<int:project_id>/drawing-sets/<int:drawing_set_id>")
+@project_access_required
+def update_drawing_set(project_id, drawing_set_id):
+    data = request.get_json(force=True) or {}
+    conn = get_db()
+    ds = conn.execute(
+        "SELECT * FROM drawing_sets WHERE id = ? AND project_id = ?", (drawing_set_id, project_id)
+    ).fetchone()
+    if not ds:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+    fields = {}
+    if "discipline" in data:
+        fields["discipline"] = (data["discipline"] or "other").strip().lower()
+        fields["discipline_confidence"] = "confirmed"
+    if "original_filename" in data and data["original_filename"]:
+        fields["original_filename"] = data["original_filename"].strip()
+    if fields:
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE drawing_sets SET {set_clause} WHERE id = ?", list(fields.values()) + [drawing_set_id])
+        conn.commit()
+    row = conn.execute("SELECT * FROM drawing_sets WHERE id = ?", (drawing_set_id,)).fetchone()
     conn.close()
     return jsonify(dict(row))
 
