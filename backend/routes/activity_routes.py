@@ -18,6 +18,28 @@ def _get_predecessor(conn, activity):
     return dict(row) if row else None
 
 
+def _validate_parent(conn, project_id, parent_id, activity_id=None):
+    """Subtasks nest one level deep only: a subtask can't itself have
+    subtasks, and a task that already has subtasks can't become one.
+    Returns an error message string, or None if `parent_id` is fine to use."""
+    if activity_id is not None and parent_id == activity_id:
+        return "A task can't be its own subtask."
+    parent = conn.execute(
+        "SELECT id, parent_activity_id FROM activities WHERE id = ? AND project_id = ?", (parent_id, project_id)
+    ).fetchone()
+    if not parent:
+        return "Parent task not found."
+    if parent["parent_activity_id"]:
+        return "Can't nest a subtask under another subtask — pick the top-level task instead."
+    if activity_id is not None:
+        has_children = conn.execute(
+            "SELECT COUNT(*) c FROM activities WHERE parent_activity_id = ?", (activity_id,)
+        ).fetchone()["c"]
+        if has_children:
+            return "This task already has subtasks of its own — it can't also become a subtask."
+    return None
+
+
 def _hydrate(conn, activity_row):
     a = dict(activity_row)
     pred = _get_predecessor(conn, a)
@@ -56,11 +78,19 @@ def create_activity(project_id):
     if not name:
         return jsonify({"error": "Activity name is required"}), 400
     conn = get_db()
+
+    parent_id = data.get("parent_activity_id") or None
+    if parent_id:
+        err = _validate_parent(conn, project_id, parent_id)
+        if err:
+            conn.close()
+            return jsonify({"error": err}), 400
+
     cur = conn.execute(
-        """INSERT INTO activities (project_id, name, trade_id, predecessor_activity_id, planned_start,
-           planned_end, forecast_start, forecast_end, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (project_id, name, data.get("trade_id"), data.get("predecessor_activity_id"),
+        """INSERT INTO activities (project_id, name, trade_id, predecessor_activity_id, parent_activity_id,
+           planned_start, planned_end, forecast_start, forecast_end, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (project_id, name, data.get("trade_id"), data.get("predecessor_activity_id"), parent_id,
          data.get("planned_start"), data.get("planned_end"),
          data.get("forecast_start") or data.get("planned_start"),
          data.get("forecast_end") or data.get("planned_end"), data.get("notes")),
@@ -91,12 +121,19 @@ def get_activity(project_id, activity_id):
     result["diary"] = [dict(d) for d in diary]
     dependents = conn.execute("SELECT id, name FROM activities WHERE predecessor_activity_id = ?", (activity_id,)).fetchall()
     result["dependents"] = [dict(d) for d in dependents]
+    if result.get("parent_activity_id"):
+        parent = conn.execute("SELECT id, name FROM activities WHERE id = ?", (result["parent_activity_id"],)).fetchone()
+        result["parent_name"] = parent["name"] if parent else None
+    subtask_rows = conn.execute(
+        "SELECT * FROM activities WHERE parent_activity_id = ? ORDER BY forecast_start, planned_start", (activity_id,)
+    ).fetchall()
+    result["subtasks"] = [_hydrate(conn, r) for r in subtask_rows]
     conn.close()
     return jsonify(result)
 
 
 EDITABLE_FIELDS = [
-    "name", "trade_id", "predecessor_activity_id", "planned_start", "planned_end",
+    "name", "trade_id", "predecessor_activity_id", "parent_activity_id", "planned_start", "planned_end",
     "forecast_start", "forecast_end", "actual_start", "actual_end",
     "progress_percent", "blocked_manual", "blocked_reason", "notes",
 ]
@@ -116,6 +153,13 @@ def update_activity(project_id, activity_id):
     existing = dict(existing)
 
     fields = {k: data[k] for k in EDITABLE_FIELDS if k in data}
+
+    if "parent_activity_id" in fields and fields["parent_activity_id"]:
+        err = _validate_parent(conn, project_id, fields["parent_activity_id"], activity_id=activity_id)
+        if err:
+            conn.close()
+            return jsonify({"error": err}), 400
+
     changed_dates = False
     changed_date_summaries = []
     DATE_FIELD_LABELS = {

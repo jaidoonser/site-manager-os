@@ -36,6 +36,7 @@ def _migrate(conn):
         ("drawing_sets", "discipline", "TEXT DEFAULT 'other'"),
         ("drawing_sets", "discipline_confidence", "TEXT DEFAULT 'low'"),
         ("sheets", "image_status", "TEXT DEFAULT 'pending'"),
+        ("activities", "parent_activity_id", "INTEGER"),
     ]
     for table, column, coltype in additions:
         existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}

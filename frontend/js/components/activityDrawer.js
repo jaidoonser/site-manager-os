@@ -114,6 +114,16 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
     ));
   }
 
+  if (activity.parent_name) {
+    drawer.appendChild(h("div", {
+      class: "card", style: "background:#fafbff;cursor:pointer;",
+      onclick: () => { close(); openActivityDrawer(pid, activity.parent_activity_id, { onChange }); },
+    },
+      h("div", { style: "font-size:12.5px;color:var(--ink-soft)" }, "Subtask of"),
+      h("div", { style: "font-size:13.5px;font-weight:600;color:var(--blue);" }, activity.parent_name + " ↗")
+    ));
+  }
+
   function todayIso() { return new Date().toISOString().slice(0, 10); }
 
   // Status (Ready/Active/Complete/etc.) is driven entirely by Actual
@@ -222,6 +232,23 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
         title: "View on the plan",
         onclick: () => { close(); navigate(`/p/${pid}/plans/${z.sheet_id}?zone=${z.id}&activity=${activity.id}`); },
       }, z.name + " ↗")))
+    ));
+  }
+
+  // Subtasks (one level of nesting - a subtask can't have its own subtasks)
+  if (activity.subtasks && activity.subtasks.length) {
+    drawer.appendChild(h("div", { class: "card" },
+      h("h2", {}, "Subtasks"),
+      h("div", { class: "row-list" }, activity.subtasks.map((s) => h("div", {
+        class: "row-item", onclick: () => { close(); openActivityDrawer(pid, s.id, { onChange }); },
+      },
+        h("div", {},
+          h("div", { class: "title" }, s.name),
+          h("div", { class: "meta" }, s.trade ? s.trade.name : "No trade set")
+        ),
+        h("div", { class: "spacer" }),
+        statusBadge(s.status, s.status_label)
+      )))
     ));
   }
 

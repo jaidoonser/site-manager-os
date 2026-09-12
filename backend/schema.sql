@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS activities (
     name TEXT NOT NULL,
     trade_id INTEGER,
     predecessor_activity_id INTEGER,
+    parent_activity_id INTEGER, -- set for a subtask of another (top-level) activity; one level of nesting only
     planned_start TEXT,
     planned_end TEXT,
     forecast_start TEXT,
@@ -101,7 +102,8 @@ CREATE TABLE IF NOT EXISTS activities (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (project_id) REFERENCES projects(id),
     FOREIGN KEY (trade_id) REFERENCES trades(id),
-    FOREIGN KEY (predecessor_activity_id) REFERENCES activities(id)
+    FOREIGN KEY (predecessor_activity_id) REFERENCES activities(id),
+    FOREIGN KEY (parent_activity_id) REFERENCES activities(id)
 );
 
 -- Many-to-many: an activity can touch multiple zones, a zone can have multiple activities

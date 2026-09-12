@@ -238,6 +238,9 @@ table.data-table tr:hover td { background: var(--bg); cursor: pointer; }
 .two-col-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 @media (max-width: 500px) { .two-col-form { grid-template-columns: 1fr; } }
 
+.data-table tr.subtask-row { background: var(--bg); }
+.data-table tr.subtask-row td:first-child { padding-left: 26px; color: var(--ink-soft); font-size: 12.8px; }
+
 .upload-drop {
   border: 2px dashed var(--border); border-radius: var(--radius); padding: 20px; text-align: center;
   color: var(--ink-soft); font-size: 13px; cursor: pointer; background: #fafbfc;
