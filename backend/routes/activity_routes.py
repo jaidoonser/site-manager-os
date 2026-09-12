@@ -221,7 +221,7 @@ def import_programme(project_id):
             pass
 
     if not parsed:
-        return jsonify({"error": "No recognisable activities found. Check the column headings (Task, Trade, Start, End/Duration, Predecessor)."}), 400
+        return jsonify({"error": "No recognisable activities found. We looked through every sheet and the first 30 rows of each for a header row with a task/activity name column plus a start, finish or duration column — check those are present somewhere in the file."}), 400
 
     conn = get_db()
     existing_trades = {r["name"].lower(): r["id"] for r in conn.execute("SELECT id, name FROM trades WHERE project_id = ?", (project_id,)).fetchall()}

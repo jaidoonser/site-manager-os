@@ -59,7 +59,7 @@ function draw(container, pid, activities, trades) {
     h("div", { class: "card" }, table),
     h("div", { class: "card", style: "font-size:12.3px;color:var(--ink-soft)" },
       h("strong", {}, "Import format: "),
-      "a spreadsheet with columns Task, Trade, Planned Start, Planned End (or Duration), and Predecessor (task name or row number). Unknown trades are created automatically."
+      "a spreadsheet with columns like Task/Activity, Trade, Start, Finish (or Duration/Workdays), and Predecessor (an ID, task name, or row number all work). Title rows above the real header and extra tabs are fine — we find the right one automatically. Unknown trades are created automatically."
     )
   );
 }
