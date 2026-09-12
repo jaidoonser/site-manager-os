@@ -1,5 +1,5 @@
 import { h, mount, fmtDateTime, toast } from "../dom.js";
-import { api } from "../api.js";
+import { api, dailyReportPdfUrl } from "../api.js";
 
 const TYPE_COLOR = { progress: "#2f6fed", delay: "#d64545", decision: "#e2a336", attendance: "#1e8e5a", safety: "#a3232f", system: "#8b93a7", note: "#8b93a7" };
 const TYPE_LABEL = { progress: "Progress", delay: "Delay", decision: "Decision", attendance: "Attendance", safety: "Safety", system: "System", note: "Note" };
@@ -48,10 +48,14 @@ function draw(container, pid, entries, diaryDay, selectedDay) {
   async function saveDay() {
     try {
       const updated = await api.updateDiaryDay(pid, dayPicker.value, dayState);
-      toast("Site diary saved for " + dayPicker.value);
+      toast("Site diary saved — opening PDF…");
       // Refresh the whole page if a safety note was logged (so it shows in the feed below)
       const freshEntries = await api.diary(pid, 200);
       draw(container, pid, freshEntries, updated, dayPicker.value);
+      // The saved record doubles as a proper daily report - hand the user a
+      // PDF of it immediately, the same document Reports can generate on
+      // demand, so "save" produces something they can print/file/send.
+      window.open(dailyReportPdfUrl(pid, dayPicker.value), "_blank");
     } catch (e) { toast(e.message, true); }
   }
 
@@ -74,7 +78,12 @@ function draw(container, pid, entries, diaryDay, selectedDay) {
     field("Instructions / decisions", "instructions", { textarea: true, placeholder: "Verbal instructions, decisions made on site, etc." }),
     field("Safety observations / incidents", "safety_notes", { textarea: true, placeholder: "Near misses, hazards, toolbox talks, incidents — logged to the diary feed below too" }),
     field("General notes", "general_notes", { textarea: true }),
-    h("button", { class: "btn btn-primary btn-sm", onclick: saveDay }, "Save site diary")
+    h("div", { style: "display:flex;gap:8px;align-items:center;" },
+      h("button", { class: "btn btn-primary btn-sm", onclick: saveDay }, "Save site diary"),
+      h("a", {
+        class: "btn btn-secondary btn-sm", href: dailyReportPdfUrl(pid, dayPicker.value), target: "_blank", rel: "noopener",
+      }, "Download PDF")
+    )
   );
 
   // ---------- Quick add to the chronological feed ----------
