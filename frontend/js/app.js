@@ -111,8 +111,8 @@ route("/projects", async () => {
 });
 
 route("/p/:id/home", (p) => guardedProjectRoute(p.id, async () => renderHome(shell("home", p.id), p.id)));
-route("/p/:id/plans", (p) => guardedProjectRoute(p.id, async () => renderPlans(shell("plans", p.id), p.id, {})));
-route("/p/:id/plans/:sheetId", (p) => guardedProjectRoute(p.id, async () => renderPlans(shell("plans", p.id), p.id, { sheetId: p.sheetId })));
+route("/p/:id/plans", (p) => guardedProjectRoute(p.id, async () => renderPlans(shell("plans", p.id), p.id, { zoneId: p.query.zone, activityId: p.query.activity })));
+route("/p/:id/plans/:sheetId", (p) => guardedProjectRoute(p.id, async () => renderPlans(shell("plans", p.id), p.id, { sheetId: p.sheetId, zoneId: p.query.zone, activityId: p.query.activity })));
 route("/p/:id/programme", (p) => guardedProjectRoute(p.id, async () => renderProgramme(shell("programme", p.id), p.id)));
 route("/p/:id/lookahead", (p) => guardedProjectRoute(p.id, async () => renderLookahead(shell("lookahead", p.id), p.id)));
 route("/p/:id/trades", (p) => guardedProjectRoute(p.id, async () => renderTrades(shell("trades", p.id), p.id)));

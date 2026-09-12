@@ -24,11 +24,16 @@ export function startRouter() {
 }
 
 function dispatch() {
-  const path = currentHash().split("?")[0];
+  const full = currentHash();
+  const [path, queryStr] = full.split("?");
+  const query = {};
+  if (queryStr) {
+    new URLSearchParams(queryStr).forEach((v, k) => { query[k] = v; });
+  }
   for (const r of routes) {
     const m = path.match(r.regex);
     if (m) {
-      const params = {};
+      const params = { query };
       r.paramNames.forEach((name, i) => { params[name] = m[i + 1]; });
       r.handler(params);
       return;
@@ -36,7 +41,7 @@ function dispatch() {
   }
   // no match
   const fallback = routes.find((r) => r._fallback);
-  if (fallback) fallback.handler({});
+  if (fallback) fallback.handler({ query });
 }
 
 export function markFallback(pattern) {

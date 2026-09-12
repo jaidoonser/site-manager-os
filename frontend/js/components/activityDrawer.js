@@ -1,5 +1,6 @@
 import { h, mount, clear, fmtDate, fmtDateTime, toast, statusBadge } from "../dom.js";
 import { api, photoFileUrl } from "../api.js";
+import { navigate } from "../router.js";
 
 let closeFn = null;
 
@@ -49,14 +50,46 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
     blocked_manual: !!activity.blocked_manual,
     blocked_reason: activity.blocked_reason || "",
     notes: activity.notes || "",
+    delay_reason: "",
   };
+
+  // Tracks the dates as they were when this drawer was opened, so we can
+  // tell whether the user has actually changed a forecast/actual date (as
+  // opposed to just re-saving) and prompt for why - e.g. a site delay -
+  // so it's on record and referenceable later.
+  const originalDates = {
+    forecast_start: editState.forecast_start,
+    forecast_end: editState.forecast_end,
+    actual_start: editState.actual_start,
+    actual_end: editState.actual_end,
+  };
+  function datesChanged() {
+    return Object.keys(originalDates).some((k) => editState[k] !== originalDates[k]);
+  }
+
+  const reasonInputEl = h("textarea", {
+    rows: 2, placeholder: "e.g. Wet weather delayed the concrete pour by 3 days",
+    oninput: (e) => { editState.delay_reason = e.target.value; },
+  });
+  const reasonWrap = h("div", { class: "field", style: "display:none;margin-top:10px;" },
+    h("label", {}, "Reason for the date change (kept on this task's history)"),
+    reasonInputEl
+  );
+  function refreshReasonVisibility() {
+    reasonWrap.style.display = datesChanged() ? "" : "none";
+  }
 
   async function save() {
     try {
-      const updated = await api.updateActivity(pid, activity.id, editState);
+      await api.updateActivity(pid, activity.id, editState);
+      // Re-fetch the full activity (not just the PUT response) so newly
+      // created diary entries - e.g. the delay-reason note just below, or a
+      // "flagged as blocked" entry - show up in Activity history right away
+      // instead of only appearing the next time the drawer is opened.
+      const fresh = await api.activity(pid, activity.id);
       toast("Saved");
-      if (onChange) onChange(updated);
-      renderDrawer(drawer, pid, updated, close, onChange);
+      if (onChange) onChange(fresh);
+      renderDrawer(drawer, pid, fresh, close, onChange);
     } catch (e) {
       toast(e.message, true);
     }
@@ -86,7 +119,7 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
     h("label", {}, label),
     h("input", {
       type: "date", value: editState[key], disabled: !!disabled,
-      onchange: (e) => { editState[key] = e.target.value; },
+      onchange: (e) => { editState[key] = e.target.value; refreshReasonVisibility(); },
     })
   );
 
@@ -99,7 +132,8 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
       dateField("Forecast end", "forecast_end"),
       dateField("Actual start", "actual_start"),
       dateField("Actual end", "actual_end"),
-    )
+    ),
+    reasonWrap
   ));
 
   // Progress + blocked
@@ -145,7 +179,11 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
   if (activity.zones && activity.zones.length) {
     drawer.appendChild(h("div", { class: "card" },
       h("h2", {}, "Linked work faces"),
-      h("div", {}, activity.zones.map((z) => h("span", { class: "tag" }, z.name)))
+      h("div", {}, activity.zones.map((z) => h("span", {
+        class: "tag", style: "cursor:pointer;",
+        title: "View on the plan",
+        onclick: () => { close(); navigate(`/p/${pid}/plans/${z.sheet_id}?zone=${z.id}&activity=${activity.id}`); },
+      }, z.name + " ↗")))
     ));
   }
 

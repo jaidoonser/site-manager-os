@@ -185,6 +185,11 @@ table.data-table tr:hover td { background: var(--bg); cursor: pointer; }
   color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.6);
 }
 .zone-box .zlabel { background: rgba(0,0,0,0.35); padding: 1px 5px; border-radius: 4px; }
+.zone-box-focus { z-index: 5; animation: zoneFocusPulse 1.4s ease-in-out 3; }
+@keyframes zoneFocusPulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(47,111,237,0.9); }
+  50% { box-shadow: 0 0 0 9px rgba(47,111,237,0.15); }
+}
 .zone-draw-hint { position: absolute; top: 8px; left: 8px; background: rgba(21,34,56,0.85); color: #fff; padding: 5px 10px; border-radius: 6px; font-size: 12px; z-index: 5; }
 
 .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-soft); margin-top: 8px; }

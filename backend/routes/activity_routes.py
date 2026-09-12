@@ -106,6 +106,7 @@ EDITABLE_FIELDS = [
 @project_access_required
 def update_activity(project_id, activity_id):
     data = request.get_json(force=True) or {}
+    delay_reason = (data.get("delay_reason") or "").strip()
     user = current_user()
     conn = get_db()
     existing = conn.execute("SELECT * FROM activities WHERE id = ? AND project_id = ?", (activity_id, project_id)).fetchone()
@@ -116,6 +117,11 @@ def update_activity(project_id, activity_id):
 
     fields = {k: data[k] for k in EDITABLE_FIELDS if k in data}
     changed_dates = False
+    changed_date_summaries = []
+    DATE_FIELD_LABELS = {
+        "forecast_start": "Forecast start", "forecast_end": "Forecast end",
+        "actual_start": "Actual start", "actual_end": "Actual end",
+    }
     for k, new_val in fields.items():
         old_val = existing.get(k)
         if str(old_val) != str(new_val):
@@ -125,8 +131,9 @@ def update_activity(project_id, activity_id):
                 (project_id, activity_id, k, str(old_val) if old_val is not None else None,
                  str(new_val) if new_val is not None else None, user["name"] if user else "system"),
             )
-            if k in ("actual_start", "actual_end", "forecast_start", "forecast_end"):
+            if k in DATE_FIELD_LABELS:
                 changed_dates = True
+                changed_date_summaries.append(f"{DATE_FIELD_LABELS[k]}: {old_val or '—'} → {new_val or '—'}")
 
     if fields:
         set_clause = ", ".join(f"{k} = ?" for k in fields)
@@ -153,6 +160,14 @@ def update_activity(project_id, activity_id):
             """INSERT INTO diary_entries (project_id, entry_type, activity_id, text, author)
                VALUES (?, 'delay', ?, ?, ?)""",
             (project_id, activity_id, f"'{existing['name']}' flagged as blocked: {fields.get('blocked_reason') or 'no reason given'}.",
+             user["name"] if user else "system"),
+        )
+    if changed_dates and delay_reason:
+        conn.execute(
+            """INSERT INTO diary_entries (project_id, entry_type, activity_id, text, author)
+               VALUES (?, 'delay', ?, ?, ?)""",
+            (project_id, activity_id,
+             f"Dates changed on '{existing['name']}' ({'; '.join(changed_date_summaries)}). Reason: {delay_reason}",
              user["name"] if user else "system"),
         )
     conn.commit()

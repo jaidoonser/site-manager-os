@@ -25,7 +25,7 @@ const DISCIPLINE_LABELS = Object.fromEntries(DISCIPLINES.map((d) => [d.value, d.
 let renderToken = 0;
 let plansRenderGen = 0;
 
-export async function renderPlans(container, pid, { sheetId } = {}) {
+export async function renderPlans(container, pid, { sheetId, zoneId, activityId } = {}) {
   const myGen = ++plansRenderGen;
   mount(container, h("div", { class: "loading" }, "Loading drawings…"));
   const drawingSets = await api.drawings(pid);
@@ -41,13 +41,22 @@ export async function renderPlans(container, pid, { sheetId } = {}) {
     for (const ds of drawingSets) { if (ds.sheets.length) { activeSheetId = ds.sheets[0].id; break; } }
   }
 
-  await drawLayout(container, pid, drawingSets, activeSheetId, null);
+  // `focus` is a mutable holder for "deep-linked" navigation (e.g. clicking a
+  // task on the Look-Ahead screen): once the target zone has been highlighted
+  // and its activity drawer opened, we clear it here so background refreshes
+  // below don't keep re-opening the drawer on every poll tick.
+  const focus = { zoneId: zoneId ? Number(zoneId) : null, activityId: activityId ? Number(activityId) : null };
+  await drawLayout(container, pid, drawingSets, activeSheetId, null, focus);
 
   // If anything's still rendering in the background, quietly refresh the
   // sheet list in a bit so the "Rendering image…" tags clear on their own.
   const anyPending = drawingSets.some((ds) => ds.sheets.some((s) => s.image_status === "pending"));
   if (anyPending) {
-    setTimeout(() => { if (myGen === plansRenderGen) renderPlans(container, pid, { sheetId: activeSheetId }); }, 4000);
+    setTimeout(() => {
+      if (myGen === plansRenderGen) {
+        renderPlans(container, pid, { sheetId: activeSheetId, zoneId: focus.zoneId || undefined, activityId: focus.activityId || undefined });
+      }
+    }, 4000);
   }
 }
 
@@ -72,7 +81,7 @@ function renderEmpty(container, pid) {
   );
 }
 
-async function drawLayout(container, pid, drawingSets, activeSheetId, activeDiscipline) {
+async function drawLayout(container, pid, drawingSets, activeSheetId, activeDiscipline, focus = {}) {
   const presentDisciplines = Array.from(new Set(drawingSets.map((ds) => ds.discipline || "other")));
   const visibleSets = activeDiscipline ? drawingSets.filter((ds) => (ds.discipline || "other") === activeDiscipline) : drawingSets;
   const allSheets = visibleSets.flatMap((ds) => ds.sheets.map((s) => ({ ...s, drawingSetName: ds.original_filename })));
@@ -172,7 +181,7 @@ async function drawLayout(container, pid, drawingSets, activeSheetId, activeDisc
 
   if (!activeSheet) return; // filtered discipline has no sheets - list-only state above is enough
   await renderSheetDetail(pid, activeSheet, sheetInfoEl, () => renderPlans(container, pid, { sheetId: activeSheet.id }));
-  await renderSheetCanvas(pid, activeSheet, canvasWrap, zoneListEl, addZoneBtn);
+  await renderSheetCanvas(pid, activeSheet, canvasWrap, zoneListEl, addZoneBtn, 0, focus);
 }
 
 async function renderSheetDetail(pid, sheet, el, onSaved) {
@@ -199,7 +208,7 @@ async function renderSheetDetail(pid, sheet, el, onSaved) {
   );
 }
 
-async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn, pollAttempt = 0) {
+async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn, pollAttempt = 0, focus = {}) {
   const myToken = ++renderToken;
   clear(wrap);
   wrap.style.width = "";
@@ -214,7 +223,7 @@ async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn, pollA
     wrap.appendChild(h("div", { class: "empty-state" },
       "Rendering this sheet's image in the background… large drawing sets can take a minute or two. This updates automatically."));
     if (pollAttempt < 40) { // ~2 minutes of polling before giving up
-      setTimeout(() => { if (myToken === renderToken) renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn, pollAttempt + 1); }, 3000);
+      setTimeout(() => { if (myToken === renderToken) renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn, pollAttempt + 1, focus); }, 3000);
     }
     return;
   }
@@ -247,19 +256,33 @@ async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn, pollA
   const refresh = () => renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn);
   let zones = await api.zones(pid, sheet.id);
   if (myToken !== renderToken) return;
-  drawZones(pid, sheet, zones, overlay, viewport, zoneListEl, refresh);
+
+  // Consume the deep-link focus (from a Look-Ahead task click) exactly once:
+  // grab it, then clear it on the shared object so any background refresh
+  // that re-renders this sheet later doesn't re-highlight/re-open the drawer.
+  const zoneIdToHighlight = focus.zoneId || null;
+  const activityIdToOpen = focus.activityId || null;
+  focus.zoneId = null;
+  focus.activityId = null;
+
+  drawZones(pid, sheet, zones, overlay, viewport, zoneListEl, refresh, zoneIdToHighlight);
 
   if (addZoneBtn) addZoneBtn.disabled = false;
   setupZoneDrawing(pid, sheet, overlay, viewport, refresh, addZoneBtn);
+
+  if (activityIdToOpen) {
+    openActivityDrawer(pid, activityIdToOpen, { onChange: refresh });
+  }
 }
 
-function drawZones(pid, sheet, zones, overlay, viewport, zoneListEl, refresh) {
+function drawZones(pid, sheet, zones, overlay, viewport, zoneListEl, refresh, focusZoneId) {
   overlay.querySelectorAll(".zone-box").forEach((n) => n.remove());
 
   zones.forEach((z) => {
     const color = STATUS_COLORS[z.status] || STATUS_COLORS.unassigned;
+    const isFocused = focusZoneId && z.id === focusZoneId;
     const box = h("div", {
-      class: "zone-box",
+      class: "zone-box" + (isFocused ? " zone-box-focus" : ""),
       style: `left:${z.x * viewport.width}px;top:${z.y * viewport.height}px;width:${z.w * viewport.width}px;height:${z.h * viewport.height}px;border-color:${color};background:${color}22;`,
       onclick: (e) => {
         e.stopPropagation();
@@ -271,6 +294,9 @@ function drawZones(pid, sheet, zones, overlay, viewport, zoneListEl, refresh) {
       },
     }, h("span", { class: "zlabel" }, z.name));
     overlay.appendChild(box);
+    if (isFocused) {
+      setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
+    }
   });
 
   mount(zoneListEl, zones.length

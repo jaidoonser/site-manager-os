@@ -1,6 +1,7 @@
 import { h, mount, fmtDate, statusBadge, daysUntil } from "../dom.js";
 import { api } from "../api.js";
 import { openActivityDrawer } from "../components/activityDrawer.js";
+import { navigate } from "../router.js";
 
 const RANGES = [
   { key: "today", label: "Today" },
@@ -31,10 +32,23 @@ function draw(container, pid, data, range) {
   });
   const dateKeys = Object.keys(groups).sort();
 
+  function openTask(a) {
+    // If this task has a work face linked on the Plans screen, jump straight
+    // there so the user sees the task in context on the drawing (its zone
+    // highlighted and its details open) - the reverse of clicking a zone on
+    // the Plans screen. Otherwise, fall back to the usual details drawer.
+    if (a.zones && a.zones.length) {
+      const zone = a.zones[0];
+      navigate(`/p/${pid}/plans/${zone.sheet_id}?zone=${zone.id}&activity=${a.id}`);
+    } else {
+      openActivityDrawer(pid, a.id, { onChange: () => refresh(range) });
+    }
+  }
+
   const body = dateKeys.length
     ? dateKeys.map((dk) => h("div", { class: "card" },
         h("h2", {}, fmtDate(dk), daysUntilLabel(dk)),
-        h("div", { class: "row-list" }, groups[dk].map((a) => h("div", { class: "row-item", onclick: () => openActivityDrawer(pid, a.id, { onChange: () => refresh(range) }) },
+        h("div", { class: "row-list" }, groups[dk].map((a) => h("div", { class: "row-item", onclick: () => openTask(a) },
           h("div", {},
             h("div", { class: "title" }, a.name),
             h("div", { class: "meta" }, (a.trade ? a.trade.name + " · " : "") + (a.zones && a.zones.length ? a.zones.map((z) => z.name).join(", ") : "No zone linked"))
