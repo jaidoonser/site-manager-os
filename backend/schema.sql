@@ -152,6 +152,31 @@ CREATE TABLE IF NOT EXISTS diary_entries (
     FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
+-- One structured "site diary" record per project per calendar day - the
+-- fields a paper site diary traditionally carries that don't fit naturally
+-- as a single timestamped diary_entries row (weather, who/what was on site,
+-- deliveries, visitors, instructions given, safety observations). The
+-- chronological diary_entries feed stays the automatic + free-form log;
+-- this is the once-a-day structured record a site manager fills in and
+-- edits throughout the day.
+CREATE TABLE IF NOT EXISTS diary_days (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    weather_conditions TEXT,
+    weather_temp TEXT,
+    personnel_notes TEXT,
+    plant_equipment TEXT,
+    deliveries TEXT,
+    visitors TEXT,
+    instructions TEXT,
+    safety_notes TEXT,
+    general_notes TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(project_id, date),
+    FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+
 CREATE TABLE IF NOT EXISTS change_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL,
@@ -183,4 +208,5 @@ CREATE INDEX IF NOT EXISTS idx_zones_sheet ON zones(sheet_id);
 CREATE INDEX IF NOT EXISTS idx_activities_project ON activities(project_id);
 CREATE INDEX IF NOT EXISTS idx_attendances_trade ON attendances(trade_id);
 CREATE INDEX IF NOT EXISTS idx_diary_project ON diary_entries(project_id);
+CREATE INDEX IF NOT EXISTS idx_diary_days_project_date ON diary_days(project_id, date);
 CREATE INDEX IF NOT EXISTS idx_suggestions_project ON ai_suggestions(project_id, status);

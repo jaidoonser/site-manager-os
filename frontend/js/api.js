@@ -140,12 +140,19 @@ export const api = {
   // diary
   diary: (pid, limit = 100) => request(`/projects/${pid}/diary?limit=${limit}`),
   createDiaryEntry: (pid, data) => request(`/projects/${pid}/diary`, { method: "POST", body: data }),
+  diaryDay: (pid, date) => request(`/projects/${pid}/diary/day/${date}`),
+  updateDiaryDay: (pid, date, data) => request(`/projects/${pid}/diary/day/${date}`, { method: "PUT", body: data }),
 
   // reports
   summary: (pid) => request(`/projects/${pid}/reports/summary`),
   lookahead: (pid, range) => request(`/projects/${pid}/reports/lookahead?range=${range}`),
   daily: (pid, date) => request(`/projects/${pid}/reports/daily?date=${date}`),
+  weekly: (pid, end) => request(`/projects/${pid}/reports/weekly?end=${end}`),
 };
+
+export function dailyReportPdfUrl(pid, date) {
+  return `${BASE}/projects/${pid}/reports/daily/pdf?date=${date}`;
+}
 
 export function drawingFileUrl(filename) {
   return `${BASE}/projects/drawing-files/${filename}`;

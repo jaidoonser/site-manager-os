@@ -48,6 +48,29 @@ def _migrate(conn):
                 # will never run for them.
                 conn.execute("UPDATE sheets SET image_status = 'done' WHERE image_filename IS NOT NULL")
                 conn.execute("UPDATE sheets SET image_status = 'failed' WHERE image_filename IS NULL")
+
+    # New tables added after a database already existed: CREATE TABLE IF NOT
+    # EXISTS (unlike ALTER TABLE ADD COLUMN above) is always safe to re-run.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS diary_days (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            weather_conditions TEXT,
+            weather_temp TEXT,
+            personnel_notes TEXT,
+            plant_equipment TEXT,
+            deliveries TEXT,
+            visitors TEXT,
+            instructions TEXT,
+            safety_notes TEXT,
+            general_notes TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, date),
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_diary_days_project_date ON diary_days(project_id, date)")
     conn.commit()
 
 

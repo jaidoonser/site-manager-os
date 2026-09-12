@@ -170,6 +170,14 @@ table.data-table tr:hover td { background: var(--bg); cursor: pointer; }
 .discipline-tabs .chip:hover { border-color: var(--blue); color: var(--blue); }
 .discipline-tabs .chip.active { background: var(--blue); border-color: var(--blue); color: #fff; }
 
+.filter-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.filter-tabs .chip {
+  border: 1px solid var(--border); background: #fff; color: var(--ink-soft); border-radius: 999px;
+  padding: 4px 11px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+}
+.filter-tabs .chip:hover { border-color: var(--blue); color: var(--blue); }
+.filter-tabs .chip.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+
 .drawing-set-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
 .drawing-set-heading .name { font-size: 11px; text-transform: uppercase; color: var(--ink-soft); font-weight: 700; }
 
