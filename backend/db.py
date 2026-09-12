@@ -1,0 +1,35 @@
+"""SQLite connection helpers for Site Manager OS."""
+import os
+import sqlite3
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "data", "site_manager.db")
+SCHEMA_PATH = os.path.join(BASE_DIR, "schema.sql")
+
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_db(reset=False):
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    if reset and os.path.exists(DB_PATH):
+        os.remove(DB_PATH)
+    conn = get_db()
+    with open(SCHEMA_PATH, "r") as f:
+        conn.executescript(f.read())
+    conn.commit()
+    conn.close()
+
+
+def row_to_dict(row):
+    if row is None:
+        return None
+    return dict(row)
+
+
+def rows_to_list(rows):
+    return [dict(r) for r in rows]
