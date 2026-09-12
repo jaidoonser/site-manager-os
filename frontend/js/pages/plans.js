@@ -134,6 +134,7 @@ async function drawLayout(container, pid, drawingSets, activeSheetId, activeDisc
   const canvasWrap = h("div", { class: "drawing-canvas-wrap" }, h("div", { class: "loading" }, "Rendering sheet…"));
   const zoneListEl = h("div", { class: "row-list" });
   const sheetInfoEl = h("div", {});
+  const addZoneBtn = h("button", { class: "btn btn-secondary btn-sm" }, "Add zone");
 
   const rightPanel = h("div", {},
     h("div", { class: "card" }, h("h2", {}, "Sheet details"), sheetInfoEl),
@@ -160,14 +161,18 @@ async function drawLayout(container, pid, drawingSets, activeSheetId, activeDisc
     ),
     h("div", { class: "plans-layout" },
       h("div", { class: "card" }, sheetListEl),
-      h("div", {}, canvasWrap, legend),
+      h("div", {},
+        h("div", { style: "display:flex;justify-content:flex-end;margin-bottom:8px;" }, addZoneBtn),
+        canvasWrap,
+        legend
+      ),
       rightPanel
     )
   );
 
   if (!activeSheet) return; // filtered discipline has no sheets - list-only state above is enough
   await renderSheetDetail(pid, activeSheet, sheetInfoEl, () => renderPlans(container, pid, { sheetId: activeSheet.id }));
-  await renderSheetCanvas(pid, activeSheet, canvasWrap, zoneListEl);
+  await renderSheetCanvas(pid, activeSheet, canvasWrap, zoneListEl, addZoneBtn);
 }
 
 async function renderSheetDetail(pid, sheet, el, onSaved) {
@@ -194,11 +199,12 @@ async function renderSheetDetail(pid, sheet, el, onSaved) {
   );
 }
 
-async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, pollAttempt = 0) {
+async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn, pollAttempt = 0) {
   const myToken = ++renderToken;
   clear(wrap);
   wrap.style.width = "";
   wrap.appendChild(h("div", { class: "loading" }, "Rendering sheet…"));
+  if (addZoneBtn) addZoneBtn.disabled = true;
 
   const full = await api.sheet(pid, sheet.id);
   if (myToken !== renderToken) return;
@@ -208,7 +214,7 @@ async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, pollAttempt = 0) 
     wrap.appendChild(h("div", { class: "empty-state" },
       "Rendering this sheet's image in the background… large drawing sets can take a minute or two. This updates automatically."));
     if (pollAttempt < 40) { // ~2 minutes of polling before giving up
-      setTimeout(() => { if (myToken === renderToken) renderSheetCanvas(pid, sheet, wrap, zoneListEl, pollAttempt + 1); }, 3000);
+      setTimeout(() => { if (myToken === renderToken) renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn, pollAttempt + 1); }, 3000);
     }
     return;
   }
@@ -238,12 +244,13 @@ async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, pollAttempt = 0) 
   overlay.style.height = height + "px";
   const viewport = { width, height };
 
-  const refresh = () => renderSheetCanvas(pid, sheet, wrap, zoneListEl);
+  const refresh = () => renderSheetCanvas(pid, sheet, wrap, zoneListEl, addZoneBtn);
   let zones = await api.zones(pid, sheet.id);
   if (myToken !== renderToken) return;
   drawZones(pid, sheet, zones, overlay, viewport, zoneListEl, refresh);
 
-  setupZoneDrawing(pid, sheet, overlay, viewport, refresh);
+  if (addZoneBtn) addZoneBtn.disabled = false;
+  setupZoneDrawing(pid, sheet, overlay, viewport, refresh, addZoneBtn);
 }
 
 function drawZones(pid, sheet, zones, overlay, viewport, zoneListEl, refresh) {
@@ -277,26 +284,62 @@ function drawZones(pid, sheet, zones, overlay, viewport, zoneListEl, refresh) {
     : [h("div", { class: "empty-state" }, "No work faces drawn yet — draw a box on the plan to create one.")]);
 }
 
-function setupZoneDrawing(pid, sheet, overlay, viewport, refresh) {
+// Pending window-level pointer listeners from a previous call, so they can
+// be torn down before attaching new ones - otherwise every re-render (every
+// sheet navigation, every zone created) would pile on another pair of
+// listeners forever.
+let _zonePointerMoveHandler = null;
+let _zonePointerUpHandler = null;
+
+function setupZoneDrawing(pid, sheet, overlay, viewport, refresh, addZoneBtn) {
+  if (_zonePointerMoveHandler) window.removeEventListener("pointermove", _zonePointerMoveHandler);
+  if (_zonePointerUpHandler) window.removeEventListener("pointerup", _zonePointerUpHandler);
+
+  let drawModeActive = false;
   let drawing = false;
+  let activePointerId = null;
   let startX, startY;
   let tempBox = null;
 
-  const hint = h("div", { class: "zone-draw-hint" }, "Drag on the plan to draw a new work-face zone");
+  const hint = h("div", { class: "zone-draw-hint" }, "Drag on the plan to draw a new work-face zone. Tap “Cancel” to stop.");
+  hint.style.display = "none";
   overlay.parentElement.appendChild(hint);
 
-  overlay.addEventListener("mousedown", (e) => {
-    if (e.target !== overlay) return; // clicked an existing zone box
+  function setDrawMode(active) {
+    drawModeActive = active;
+    hint.style.display = active ? "" : "none";
+    overlay.style.cursor = active ? "crosshair" : "";
+    // touch-action: none while drawing so a finger-drag draws a box instead
+    // of scrolling the page; back to normal so pinch/scroll works otherwise.
+    overlay.style.touchAction = active ? "none" : "auto";
+    if (addZoneBtn) {
+      addZoneBtn.textContent = active ? "Cancel" : "Add zone";
+      addZoneBtn.classList.toggle("btn-primary", active);
+      addZoneBtn.classList.toggle("btn-secondary", !active);
+    }
+    if (!active && tempBox) { tempBox.remove(); tempBox = null; }
+    drawing = false;
+    activePointerId = null;
+  }
+  setDrawMode(false);
+
+  if (addZoneBtn) addZoneBtn.onclick = () => setDrawMode(!drawModeActive);
+
+  overlay.addEventListener("pointerdown", (e) => {
+    if (!drawModeActive) return; // view mode - let clicks reach existing zone boxes normally
+    if (e.target !== overlay) return; // clicked an existing zone box, not empty plan area
+    e.preventDefault();
     const rect = overlay.getBoundingClientRect();
     startX = e.clientX - rect.left;
     startY = e.clientY - rect.top;
     drawing = true;
+    activePointerId = e.pointerId;
     tempBox = h("div", { class: "zone-box", style: `left:${startX}px;top:${startY}px;width:0;height:0;border-color:#2f6fed;background:#2f6fed22;` });
     overlay.appendChild(tempBox);
   });
 
-  window.addEventListener("mousemove", (e) => {
-    if (!drawing || !tempBox) return;
+  _zonePointerMoveHandler = (e) => {
+    if (!drawing || !tempBox || e.pointerId !== activePointerId) return;
     const rect = overlay.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -304,11 +347,12 @@ function setupZoneDrawing(pid, sheet, overlay, viewport, refresh) {
     const w = Math.abs(x - startX), hgt = Math.abs(y - startY);
     tempBox.style.left = left + "px"; tempBox.style.top = top + "px";
     tempBox.style.width = w + "px"; tempBox.style.height = hgt + "px";
-  });
+  };
 
-  window.addEventListener("mouseup", async (e) => {
-    if (!drawing) return;
+  _zonePointerUpHandler = async (e) => {
+    if (!drawing || e.pointerId !== activePointerId) return;
     drawing = false;
+    activePointerId = null;
     if (!tempBox) return;
     const w = parseFloat(tempBox.style.width);
     const hgt = parseFloat(tempBox.style.height);
@@ -327,9 +371,12 @@ function setupZoneDrawing(pid, sheet, overlay, viewport, refresh) {
         w: w / viewport.width, h: hgt / viewport.height,
       });
       toast("Zone created");
-      refresh();
+      refresh(); // renderSheetCanvas re-runs and rebuilds in view mode by default
     } catch (err) { toast(err.message, true); }
-  });
+  };
+
+  window.addEventListener("pointermove", _zonePointerMoveHandler);
+  window.addEventListener("pointerup", _zonePointerUpHandler);
 }
 
 // Shared upload flow for both the empty-state and the normal-state upload
