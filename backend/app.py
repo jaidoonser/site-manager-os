@@ -16,7 +16,7 @@ FRONTEND_DIR = os.path.join(os.path.dirname(BASE_DIR), "frontend")
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me-in-production")
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB upload cap
+app.config["MAX_CONTENT_LENGTH"] = 150 * 1024 * 1024  # real multi-sheet drawing set PDFs can be large
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(project_bp)
@@ -30,6 +30,12 @@ app.register_blueprint(report_bp)
 @app.get("/api/health")
 def health():
     return jsonify({"ok": True})
+
+
+@app.errorhandler(413)
+def too_large(e):
+    max_mb = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
+    return jsonify({"error": f"That file is larger than the {max_mb}MB upload limit."}), 413
 
 
 @app.get("/")
@@ -58,4 +64,8 @@ if __name__ == "__main__":
         _migrate(_conn)
         _conn.close()
     port = int(os.environ.get("PORT", 8000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    # threaded=True: uploads kick off a background thread to rasterize
+    # drawing pages (see routes/project_routes.py), so the server needs to
+    # keep serving other requests (like polling for that thread's progress)
+    # while it runs rather than blocking on a single request at a time.
+    app.run(host="0.0.0.0", port=port, debug=True, threaded=True)

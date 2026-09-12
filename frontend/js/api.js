@@ -58,6 +58,37 @@ export const api = {
     if (discipline) fd.append("discipline", discipline);
     return request(`/projects/${pid}/drawings`, { method: "POST", body: fd });
   },
+  // Same endpoint as uploadDrawing, but over XMLHttpRequest so we can report
+  // real upload-progress percentage (fetch has no cross-browser-reliable
+  // way to do this for the request body). onProgress(pct) fires as bytes
+  // go out; the server responds quickly once the PDF is indexed (page
+  // images render afterwards in the background), so pct reaching 100 just
+  // means "waiting on the server to index it", not that everything is done.
+  uploadDrawingWithProgress: (pid, file, discipline, onProgress) => {
+    return new Promise((resolve, reject) => {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (discipline) fd.append("discipline", discipline);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${BASE}/projects/${pid}/drawings`);
+      xhr.withCredentials = true;
+      xhr.timeout = 5 * 60 * 1000; // generous - the request itself should be fast, but large files take a while just to transfer over a phone connection
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+      xhr.onload = () => {
+        let data = null;
+        try { data = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch (e) { /* non-JSON error page, e.g. a 413 */ }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+        else reject(new Error((data && data.error) || `Upload failed (${xhr.status})`));
+      };
+      xhr.onerror = () => reject(new Error("Network error during upload — check the connection and try again."));
+      xhr.ontimeout = () => reject(new Error("Upload timed out — the file may be too large for the current connection."));
+      xhr.send(fd);
+    });
+  },
   updateDrawingSet: (pid, dsid, data) => request(`/projects/${pid}/drawing-sets/${dsid}`, { method: "PUT", body: data }),
   sheet: (pid, sid) => request(`/projects/${pid}/sheets/${sid}`),
   updateSheet: (pid, sid, data) => request(`/projects/${pid}/sheets/${sid}`, { method: "PUT", body: data }),

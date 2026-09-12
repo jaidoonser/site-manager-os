@@ -23,10 +23,13 @@ const DISCIPLINES = [
 const DISCIPLINE_LABELS = Object.fromEntries(DISCIPLINES.map((d) => [d.value, d.label]));
 
 let renderToken = 0;
+let plansRenderGen = 0;
 
 export async function renderPlans(container, pid, { sheetId } = {}) {
+  const myGen = ++plansRenderGen;
   mount(container, h("div", { class: "loading" }, "Loading drawings…"));
   const drawingSets = await api.drawings(pid);
+  if (myGen !== plansRenderGen) return;
 
   if (!drawingSets.length) {
     renderEmpty(container, pid);
@@ -39,6 +42,13 @@ export async function renderPlans(container, pid, { sheetId } = {}) {
   }
 
   await drawLayout(container, pid, drawingSets, activeSheetId, null);
+
+  // If anything's still rendering in the background, quietly refresh the
+  // sheet list in a bit so the "Rendering image…" tags clear on their own.
+  const anyPending = drawingSets.some((ds) => ds.sheets.some((s) => s.image_status === "pending"));
+  if (anyPending) {
+    setTimeout(() => { if (myGen === plansRenderGen) renderPlans(container, pid, { sheetId: activeSheetId }); }, 4000);
+  }
 }
 
 function renderEmpty(container, pid) {
@@ -48,12 +58,7 @@ function renderEmpty(container, pid) {
     if (!file) return;
     const discipline = await promptDiscipline("What kind of drawing set is this?", { includeAuto: true });
     if (discipline === null) { fileInput.value = ""; return; }
-    toast("Uploading and indexing sheets…");
-    try {
-      await api.uploadDrawing(pid, file, discipline || undefined);
-      toast("Drawing set uploaded");
-      renderPlans(container, pid, {});
-    } catch (e) { toast(e.message, true); }
+    await doUpload(pid, file, discipline, (ds) => renderPlans(container, pid, { sheetId: ds.sheets[0] ? ds.sheets[0].id : undefined }));
   });
   mount(container,
     h("div", { class: "page-header" }, h("h1", {}, "Plans")),
@@ -79,12 +84,7 @@ async function drawLayout(container, pid, drawingSets, activeSheetId, activeDisc
     if (!file) return;
     const discipline = await promptDiscipline("What kind of drawing set is this?", { includeAuto: true });
     if (discipline === null) { fileInput.value = ""; return; }
-    toast("Uploading and indexing sheets…");
-    try {
-      const ds = await api.uploadDrawing(pid, file, discipline || undefined);
-      toast(`Indexed ${ds.sheets.length} sheet(s)`);
-      renderPlans(container, pid, { sheetId: ds.sheets[0] ? ds.sheets[0].id : undefined });
-    } catch (e) { toast(e.message, true); }
+    await doUpload(pid, file, discipline, (ds) => renderPlans(container, pid, { sheetId: ds.sheets[0] ? ds.sheets[0].id : undefined }));
   });
 
   async function editDiscipline(ds) {
@@ -125,7 +125,8 @@ async function drawLayout(container, pid, drawingSets, activeSheetId, activeDisc
       },
         h("div", { class: "num" }, s.sheet_number),
         h("div", { class: "tt" }, s.sheet_title),
-        s.ai_confidence !== "confirmed" ? h("div", { class: "needs-review" }, "AI guess — review") : null
+        s.ai_confidence !== "confirmed" ? h("div", { class: "needs-review" }, "AI guess — review") : null,
+        s.image_status === "pending" ? h("div", { style: "font-size:10.5px;color:var(--ink-soft);" }, "Rendering image…") : null
       ))
     ))
   );
@@ -193,7 +194,7 @@ async function renderSheetDetail(pid, sheet, el, onSaved) {
   );
 }
 
-async function renderSheetCanvas(pid, sheet, wrap, zoneListEl) {
+async function renderSheetCanvas(pid, sheet, wrap, zoneListEl, pollAttempt = 0) {
   const myToken = ++renderToken;
   clear(wrap);
   wrap.style.width = "";
@@ -202,9 +203,19 @@ async function renderSheetCanvas(pid, sheet, wrap, zoneListEl) {
   const full = await api.sheet(pid, sheet.id);
   if (myToken !== renderToken) return;
 
+  if (full.image_status === "pending") {
+    clear(wrap);
+    wrap.appendChild(h("div", { class: "empty-state" },
+      "Rendering this sheet's image in the background… large drawing sets can take a minute or two. This updates automatically."));
+    if (pollAttempt < 40) { // ~2 minutes of polling before giving up
+      setTimeout(() => { if (myToken === renderToken) renderSheetCanvas(pid, sheet, wrap, zoneListEl, pollAttempt + 1); }, 3000);
+    }
+    return;
+  }
+
   if (!full.image_filename) {
     clear(wrap);
-    wrap.appendChild(h("div", { class: "empty-state" }, "This sheet couldn't be rendered as an image."));
+    wrap.appendChild(h("div", { class: "empty-state" }, "This sheet couldn't be rendered as an image — the page may be corrupted or in an unsupported format."));
     return;
   }
 
@@ -319,6 +330,53 @@ function setupZoneDrawing(pid, sheet, overlay, viewport, refresh) {
       refresh();
     } catch (err) { toast(err.message, true); }
   });
+}
+
+// Shared upload flow for both the empty-state and the normal-state upload
+// buttons: shows a real progress bar (from actual upload-progress events,
+// not a guess) while the file transfers, then a brief "indexing" phase
+// while the server responds - which should now be quick, since page image
+// rendering happens in the background rather than blocking the response.
+async function doUpload(pid, file, discipline, onDone) {
+  const progress = showUploadProgress(file.name);
+  try {
+    const ds = await api.uploadDrawingWithProgress(pid, file, discipline || undefined, (pct) => {
+      progress.setPercent(pct);
+      if (pct >= 100) progress.setIndexing();
+    });
+    progress.close();
+    toast(`Indexed ${ds.sheets.length} sheet(s) — page images are rendering in the background`);
+    await onDone(ds);
+  } catch (e) {
+    progress.close();
+    toast(e.message, true);
+  }
+}
+
+function showUploadProgress(filename) {
+  const fill = h("div", { style: "height:100%;width:0%;background:var(--blue);border-radius:6px;transition:width .15s;" });
+  const bar = h("div", { style: "height:8px;background:var(--grey-light);border-radius:6px;overflow:hidden;margin:14px 0 8px;" }, fill);
+  const statusText = h("div", { style: "font-size:12.5px;color:var(--ink-soft);" }, "Uploading… 0%");
+  const bg = h("div", { class: "modal-center-bg" },
+    h("div", { class: "modal-card", style: "max-width:380px;text-align:left;" },
+      h("div", { style: "font-weight:700;margin-bottom:4px;" }, "Uploading drawing set"),
+      h("div", { style: "font-size:12.5px;color:var(--ink-soft);overflow-wrap:anywhere;" }, filename),
+      bar,
+      statusText
+    )
+  );
+  document.body.appendChild(bg);
+  return {
+    setPercent(pct) {
+      fill.style.width = pct + "%";
+      statusText.textContent = `Uploading… ${pct}%`;
+    },
+    setIndexing() {
+      fill.style.width = "100%";
+      statusText.textContent = "Upload complete — indexing sheets…";
+    },
+    close() { bg.remove(); },
+  };
 }
 
 function promptDiscipline(title, { includeAuto = false, current } = {}) {

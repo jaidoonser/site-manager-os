@@ -35,11 +35,19 @@ def _migrate(conn):
     additions = [
         ("drawing_sets", "discipline", "TEXT DEFAULT 'other'"),
         ("drawing_sets", "discipline_confidence", "TEXT DEFAULT 'low'"),
+        ("sheets", "image_status", "TEXT DEFAULT 'pending'"),
     ]
     for table, column, coltype in additions:
         existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
         if column not in existing:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+            if table == "sheets" and column == "image_status":
+                # Backfill: rows from before this column existed already have
+                # their image rendered (or don't) - don't mark them 'pending'
+                # and have the UI wait forever for a background render that
+                # will never run for them.
+                conn.execute("UPDATE sheets SET image_status = 'done' WHERE image_filename IS NOT NULL")
+                conn.execute("UPDATE sheets SET image_status = 'failed' WHERE image_filename IS NULL")
     conn.commit()
 
 

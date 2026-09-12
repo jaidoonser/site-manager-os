@@ -1,5 +1,6 @@
 import os
 import uuid
+import threading
 from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from db import get_db
 from auth import login_required, project_access_required, current_user
@@ -123,18 +124,18 @@ def upload_drawing(project_id):
     )
     drawing_set_id = cur.lastrowid
     sheet_ids = []
+    # Sheet rows go in immediately with image_status='pending' - the actual
+    # rasterization (render_sheet_image, one poppler subprocess per page)
+    # happens afterwards in a background thread. A large real-world drawing
+    # set can take well over a minute to rasterize page-by-page; doing that
+    # synchronously inside this request risks the platform's request
+    # timeout killing the connection before the upload ever finishes, which
+    # looks to the user like the upload silently did nothing.
     for p in pages:
-        image_filename = None
-        try:
-            out_prefix = os.path.join(UPLOAD_DRAWINGS, f"{os.path.splitext(stored_name)[0]}_p{p['page_number']}")
-            image_path = render_sheet_image(path, p["page_number"], out_prefix)
-            image_filename = os.path.basename(image_path)
-        except Exception:
-            image_filename = None
         c2 = conn.execute(
-            """INSERT INTO sheets (project_id, drawing_set_id, page_number, sheet_number, sheet_title, sheet_type, ai_confidence, image_filename)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (project_id, drawing_set_id, p["page_number"], p["sheet_number"], p["sheet_title"], p["sheet_type"], p["ai_confidence"], image_filename),
+            """INSERT INTO sheets (project_id, drawing_set_id, page_number, sheet_number, sheet_title, sheet_type, ai_confidence, image_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')""",
+            (project_id, drawing_set_id, p["page_number"], p["sheet_number"], p["sheet_title"], p["sheet_type"], p["ai_confidence"]),
         )
         sheet_ids.append(c2.lastrowid)
     conn.execute(
@@ -147,7 +148,36 @@ def upload_drawing(project_id):
     conn.close()
     result = dict(row)
     result["sheets"] = [dict(s) for s in sheets]
+
+    page_numbers_by_sheet_id = {sid: p["page_number"] for sid, p in zip(sheet_ids, pages)}
+    threading.Thread(
+        target=_render_sheets_in_background,
+        args=(path, stored_name, page_numbers_by_sheet_id),
+        daemon=True,
+    ).start()
+
     return jsonify(result), 201
+
+
+def _render_sheets_in_background(pdf_path, stored_name, page_numbers_by_sheet_id):
+    """Rasterize each sheet's page to a PNG one at a time, updating its row
+    as soon as it's done. Runs on its own thread with its own DB connection
+    (sqlite3 connections aren't safe to share across threads) so the upload
+    request itself never has to wait on this."""
+    conn = get_db()
+    for sheet_id, page_number in page_numbers_by_sheet_id.items():
+        try:
+            out_prefix = os.path.join(UPLOAD_DRAWINGS, f"{os.path.splitext(stored_name)[0]}_p{page_number}")
+            image_path = render_sheet_image(pdf_path, page_number, out_prefix)
+            image_filename = os.path.basename(image_path)
+            conn.execute(
+                "UPDATE sheets SET image_filename = ?, image_status = 'done' WHERE id = ?",
+                (image_filename, sheet_id),
+            )
+        except Exception:
+            conn.execute("UPDATE sheets SET image_status = 'failed' WHERE id = ?", (sheet_id,))
+        conn.commit()  # commit after every page so the frontend can pick up progress incrementally
+    conn.close()
 
 
 @bp.get("/<int:project_id>/sheets/<int:sheet_id>")

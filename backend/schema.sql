@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS sheets (
     sheet_type TEXT DEFAULT 'plan', -- plan | elevation | section | detail | other
     ai_confidence TEXT DEFAULT 'low', -- low | medium | high | confirmed
     image_filename TEXT, -- rasterized PNG of this page, rendered server-side for the Plans viewer
+    image_status TEXT DEFAULT 'pending', -- pending | done | failed - image rendering happens in the background after upload so large sets don't block the request
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (drawing_set_id) REFERENCES drawing_sets(id),
     FOREIGN KEY (project_id) REFERENCES projects(id)

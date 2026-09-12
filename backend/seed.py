@@ -128,9 +128,9 @@ def run():
         except Exception as e:
             print("Warning: could not rasterize page", page_num, e)
         cur = conn.execute(
-            """INSERT INTO sheets (project_id, drawing_set_id, page_number, sheet_number, sheet_title, sheet_type, ai_confidence, image_filename)
-               VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?)""",
-            (project_id, drawing_set_id, page_num, meta["sheet_number"], meta["sheet_title"], meta["sheet_type"], image_filename),
+            """INSERT INTO sheets (project_id, drawing_set_id, page_number, sheet_number, sheet_title, sheet_type, ai_confidence, image_filename, image_status)
+               VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?)""",
+            (project_id, drawing_set_id, page_num, meta["sheet_number"], meta["sheet_title"], meta["sheet_type"], image_filename, "done" if image_filename else "failed"),
         )
         sheet_ids[page_num] = cur.lastrowid
         for zone in SHEET_ZONES[page_num]:
