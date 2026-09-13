@@ -160,6 +160,15 @@ def update_activity(project_id, activity_id):
             conn.close()
             return jsonify({"error": err}), 400
 
+    if "predecessor_activity_id" in fields and fields["predecessor_activity_id"]:
+        if str(fields["predecessor_activity_id"]) == str(activity_id):
+            conn.close()
+            return jsonify({"error": "A task can't be its own predecessor."}), 400
+
+    if "name" in fields and not str(fields["name"]).strip():
+        conn.close()
+        return jsonify({"error": "Task name is required"}), 400
+
     changed_dates = False
     changed_date_summaries = []
     DATE_FIELD_LABELS = {
@@ -229,6 +238,47 @@ def update_activity(project_id, activity_id):
     result = _hydrate(conn, row)
     conn.close()
     return jsonify(result)
+
+
+@bp.delete("/<int:project_id>/activities/<int:activity_id>")
+@project_access_required
+def delete_activity(project_id, activity_id):
+    conn = get_db()
+    existing = conn.execute("SELECT * FROM activities WHERE id = ? AND project_id = ?", (activity_id, project_id)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+
+    subtasks = conn.execute("SELECT name FROM activities WHERE parent_activity_id = ?", (activity_id,)).fetchall()
+    if subtasks:
+        conn.close()
+        names = ", ".join(s["name"] for s in subtasks[:5]) + (", …" if len(subtasks) > 5 else "")
+        return jsonify({
+            "error": f"This task has {len(subtasks)} subtask(s) ({names}) — delete or move those first."
+        }), 409
+
+    dependents = conn.execute("SELECT name FROM activities WHERE predecessor_activity_id = ?", (activity_id,)).fetchall()
+    if dependents:
+        conn.close()
+        names = ", ".join(d["name"] for d in dependents[:5]) + (", …" if len(dependents) > 5 else "")
+        return jsonify({
+            "error": f"{len(dependents)} task(s) ({names}) list this as their predecessor — update those first."
+        }), 409
+
+    # Everything below is data owned by, or referencing, this activity.
+    # Zone links and stale AI suggestions are removed outright; attendances,
+    # photos and diary history are kept but detached so the historical
+    # record (who was on site, what was said, what progress was logged)
+    # doesn't silently disappear along with the task.
+    conn.execute("DELETE FROM activity_zones WHERE activity_id = ?", (activity_id,))
+    conn.execute("DELETE FROM ai_suggestions WHERE activity_id = ?", (activity_id,))
+    conn.execute("UPDATE attendances SET activity_id = NULL WHERE activity_id = ?", (activity_id,))
+    conn.execute("UPDATE photos SET activity_id = NULL WHERE activity_id = ?", (activity_id,))
+    conn.execute("UPDATE diary_entries SET activity_id = NULL WHERE activity_id = ?", (activity_id,))
+    conn.execute("DELETE FROM activities WHERE id = ?", (activity_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
 
 
 @bp.post("/<int:project_id>/activities/<int:activity_id>/zones")

@@ -32,7 +32,10 @@ function draw(container, pid, trade) {
       h("div", {}, h("strong", {}, "Phone: "), trade.contact_phone || "—"),
       h("div", {}, h("strong", {}, "Email: "), trade.contact_email || "—"),
     ),
-    h("button", { class: "btn btn-secondary btn-sm", style: "margin-top:10px", onclick: () => openEditTradeModal(pid, trade, refresh) }, "Edit contact")
+    h("div", { style: "display:flex;gap:8px;margin-top:10px;" },
+      h("button", { class: "btn btn-secondary btn-sm", onclick: () => openEditTradeModal(pid, trade, refresh) }, "Edit contact"),
+      h("button", { class: "btn btn-danger btn-sm", onclick: () => deleteTrade(pid, trade) }, "Delete trade")
+    )
   );
 
   const activitiesCard = h("div", { class: "card" },
@@ -102,6 +105,18 @@ function attendanceRow(pid, trade, att, refresh) {
     h("div", { style: "font-size:11px;text-transform:uppercase;color:var(--ink-soft);font-weight:700;margin-top:10px;" }, "Preparation checklist"),
     checklistEl
   );
+}
+
+async function deleteTrade(pid, trade) {
+  const ok = window.confirm(`Delete "${trade.name}"? This also removes its attendance history. This can't be undone.`);
+  if (!ok) return;
+  try {
+    await api.deleteTrade(pid, trade.id);
+    toast("Trade deleted");
+    navigate(`/p/${pid}/trades`);
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 function safeParse(json) {

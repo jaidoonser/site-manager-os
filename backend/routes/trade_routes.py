@@ -94,6 +94,35 @@ def update_trade(project_id, trade_id):
     return jsonify(dict(row))
 
 
+@bp.delete("/<int:project_id>/trades/<int:trade_id>")
+@project_access_required
+def delete_trade(project_id, trade_id):
+    conn = get_db()
+    existing = conn.execute("SELECT * FROM trades WHERE id = ? AND project_id = ?", (trade_id, project_id)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({"error": "Not found"}), 404
+
+    assigned = conn.execute(
+        "SELECT name FROM activities WHERE trade_id = ? AND project_id = ?", (trade_id, project_id)
+    ).fetchall()
+    if assigned:
+        conn.close()
+        names = ", ".join(a["name"] for a in assigned[:5]) + (", …" if len(assigned) > 5 else "")
+        return jsonify({
+            "error": f"{len(assigned)} task(s) are still assigned to this trade ({names}) — reassign them to a "
+                     f"different trade (or none) first."
+        }), 409
+
+    # Attendance records belong to the trade and aren't meaningful without
+    # it, so they're removed along with it.
+    conn.execute("DELETE FROM attendances WHERE trade_id = ?", (trade_id,))
+    conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 # ---------- Attendances ----------
 
 @bp.post("/<int:project_id>/trades/<int:trade_id>/attendances")

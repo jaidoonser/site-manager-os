@@ -104,6 +104,7 @@ export const api = {
   createTrade: (pid, data) => request(`/projects/${pid}/trades`, { method: "POST", body: data }),
   trade: (pid, tid) => request(`/projects/${pid}/trades/${tid}`),
   updateTrade: (pid, tid, data) => request(`/projects/${pid}/trades/${tid}`, { method: "PUT", body: data }),
+  deleteTrade: (pid, tid) => request(`/projects/${pid}/trades/${tid}`, { method: "DELETE" }),
   createAttendance: (pid, tid, data) => request(`/projects/${pid}/trades/${tid}/attendances`, { method: "POST", body: data }),
   updateAttendance: (pid, aid, data) => request(`/projects/${pid}/attendances/${aid}`, { method: "PUT", body: data }),
 
@@ -112,6 +113,7 @@ export const api = {
   activity: (pid, aid) => request(`/projects/${pid}/activities/${aid}`),
   createActivity: (pid, data) => request(`/projects/${pid}/activities`, { method: "POST", body: data }),
   updateActivity: (pid, aid, data) => request(`/projects/${pid}/activities/${aid}`, { method: "PUT", body: data }),
+  deleteActivity: (pid, aid) => request(`/projects/${pid}/activities/${aid}`, { method: "DELETE" }),
   linkZone: (pid, aid, zoneId) => request(`/projects/${pid}/activities/${aid}/zones`, { method: "POST", body: { zone_id: zoneId } }),
   unlinkZone: (pid, aid, zid) => request(`/projects/${pid}/activities/${aid}/zones/${zid}`, { method: "DELETE" }),
 

@@ -40,6 +40,9 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
   clear(drawer);
 
   const editState = {
+    name: activity.name || "",
+    trade_id: activity.trade_id || "",
+    predecessor_activity_id: activity.predecessor_activity_id || "",
     planned_start: activity.planned_start || "",
     planned_end: activity.planned_end || "",
     forecast_start: activity.forecast_start || "",
@@ -80,8 +83,14 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
   }
 
   async function save() {
+    if (!editState.name.trim()) { toast("Task name is required", true); return; }
     try {
-      await api.updateActivity(pid, activity.id, editState);
+      const payload = {
+        ...editState,
+        trade_id: editState.trade_id || null,
+        predecessor_activity_id: editState.predecessor_activity_id || null,
+      };
+      await api.updateActivity(pid, activity.id, payload);
       // Re-fetch the full activity (not just the PUT response) so newly
       // created diary entries - e.g. the delay-reason note just below, or a
       // "flagged as blocked" entry - show up in Activity history right away
@@ -107,12 +116,58 @@ function renderDrawer(drawer, pid, activity, close, onChange) {
   );
   drawer.appendChild(header);
 
-  if (activity.predecessor_name) {
-    drawer.appendChild(h("div", { class: "card", style: "background:#fafbff" },
-      h("div", { style: "font-size:12.5px;color:var(--ink-soft)" }, "Predecessor"),
-      h("div", { style: "font-size:13.5px;font-weight:600" }, activity.predecessor_name)
-    ));
+  async function deleteTask() {
+    const ok = window.confirm(`Delete "${activity.name}"? This can't be undone.`);
+    if (!ok) return;
+    try {
+      await api.deleteActivity(pid, activity.id);
+      toast("Task deleted");
+      close();
+      if (onChange) onChange();
+    } catch (e) {
+      toast(e.message, true);
+    }
   }
+
+  const nameInput = h("input", {
+    type: "text", value: editState.name,
+    oninput: (e) => { editState.name = e.target.value; },
+  });
+  const tradeSelect = h("select", { disabled: true }, h("option", { value: "" }, "Loading…"));
+  const predecessorSelect = h("select", { disabled: true }, h("option", { value: "" }, "Loading…"));
+
+  drawer.appendChild(h("div", { class: "card" },
+    h("div", { style: "display:flex;justify-content:space-between;align-items:center;" },
+      h("h2", {}, "Details"),
+      h("button", { class: "btn btn-danger btn-sm", onclick: deleteTask }, "Delete task")
+    ),
+    h("div", { class: "field" }, h("label", {}, "Task name"), nameInput),
+    h("div", { class: "two-col-form" },
+      h("div", { class: "field" }, h("label", {}, "Trade"), tradeSelect),
+      h("div", { class: "field" }, h("label", {}, "Predecessor"), predecessorSelect),
+    )
+  ));
+
+  // Trade + predecessor choices need the project's full lists, which the
+  // activity payload itself doesn't carry - fetched once and filled in
+  // once they arrive, preserving whatever is already set.
+  Promise.all([api.trades(pid), api.activities(pid)]).then(([trades, allActivities]) => {
+    clear(tradeSelect);
+    tradeSelect.appendChild(h("option", { value: "" }, "— none —"));
+    trades.forEach((t) => tradeSelect.appendChild(
+      h("option", { value: String(t.id), selected: String(t.id) === String(editState.trade_id) }, t.name)
+    ));
+    tradeSelect.disabled = false;
+    tradeSelect.onchange = (e) => { editState.trade_id = e.target.value; };
+
+    clear(predecessorSelect);
+    predecessorSelect.appendChild(h("option", { value: "" }, "— none —"));
+    allActivities.filter((a) => a.id !== activity.id).forEach((a) => predecessorSelect.appendChild(
+      h("option", { value: String(a.id), selected: String(a.id) === String(editState.predecessor_activity_id) }, a.name)
+    ));
+    predecessorSelect.disabled = false;
+    predecessorSelect.onchange = (e) => { editState.predecessor_activity_id = e.target.value; };
+  }).catch(() => { /* selects just stay disabled if this fails */ });
 
   if (activity.parent_name) {
     drawer.appendChild(h("div", {
